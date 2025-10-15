@@ -1,0 +1,7 @@
+<mvc:View controllerName="app.customcontrol.controller.Main"
+    xmlns:mvc="sap.ui.core.mvc"
+    xmlns="sap.m">
+    <Page id="page" title="{i18n>title}">
+        <Button id="idMailBtn" text="Trigger Mail" press="onTriggerMail"/>
+    </Page>
+</mvc:View>
