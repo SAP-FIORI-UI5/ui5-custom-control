@@ -8,8 +8,11 @@ sap.ui.define([
     'sap/m/TextArea',
     'sap/ui/layout/form/SimpleForm',
     'sap/m/Button',
-    'sap/m/MessageToast'
-], (Dialog, DataType, Label, MultiInput, Token, Text, TextArea, SimpleForm, Button, MessageToast) => {
+    'sap/m/MessageToast',
+    'sap/ui/core/Item',
+    "sap/ui/model/Filter",
+    "sap/ui/model/FilterOperator"
+], (Dialog, DataType, Label, MultiInput, Token, Text, TextArea, SimpleForm, Button, MessageToast, Item, Filter, FilterOperator) => {
     "use strict";
 
     let thisLib = {
@@ -21,6 +24,8 @@ sap.ui.define([
         metadata: {
             properties: {
                 emailDialogType: { type: 'app.util.EmailDialogType', defaultValue: 'Compose' },
+                to: { type: 'object', defaultValue: [] },
+                cc: { type: 'object', defaultValue: [] },
                 showPreviousMessage: { type: 'boolean' },
                 previousMessage: { type: 'string' },
                 previousMessageLabel: { type: 'string', defaultValue: 'Message' },
@@ -40,18 +45,18 @@ sap.ui.define([
             this._formatter = this._getFormatter.apply(this, arguments);
 
             this._toLabel = new Label({ text: 'To', required: true });
-            this._toMultiInput = new MultiInput({ showSuggestions: true });
+            this._toMultiInput = new MultiInput({ showSuggestions: true, showValueHelp: false });
             this._toMultiInput.addValidator(this._formatter.validateEmail);
 
             this._ccLabel = new Label({ text: 'Cc' });
-            this._ccMultiInput = new MultiInput({ showSuggestions: true });
+            this._ccMultiInput = new MultiInput({ showSuggestions: true, showValueHelp: false });
             this._ccMultiInput.addValidator(this._formatter.validateEmail);
 
             this._prevMsgLabel = new Label();
             this._prevMsgText = new Text();
 
             this._msgLabel = new Label({ required: true });
-            this._msgText = new TextArea({ roes: 5, cols: 10, placeholder: 'Write your message...' });
+            this._msgTextArea = new TextArea({ rows: 5, cols: 10, placeholder: 'Write your message...' });
             const oContent = new SimpleForm({
                 content: [
                     this._toLabel,
@@ -61,7 +66,7 @@ sap.ui.define([
                     this._prevMsgLabel,
                     this._prevMsgText,
                     this._msgLabel,
-                    this._msgText
+                    this._msgTextArea
                 ]
             });
             this.addContent(oContent);
@@ -74,9 +79,11 @@ sap.ui.define([
         },
         onBeforeRendering: function () {
             Dialog.prototype.onBeforeRendering.apply(this, arguments);
-            this.clear();
 
             this.setTitle(this._formatter.setDialogTitle(this.getTitle(), this.getEmailDialogType()));
+
+            this._addMailId(this._toMultiInput, this.getTo());
+            this._addMailId(this._ccMultiInput, this.getCc());
 
             const bShowPreviousMsg = this._formatter.showPreviousMessage(this.getShowPreviousMessage(), this.getEmailDialogType());
             this._prevMsgLabel.setVisible(bShowPreviousMsg);
@@ -93,24 +100,37 @@ sap.ui.define([
             this._toMultiInput.removeAllTokens();
             this._ccMultiInput.removeAllTokens();
             this._prevMsgText.setText();
-            this._msgText.setValue();
+            this._msgTextArea.setValue();
         },
-        addTo: function (aMailId) {
-            aMailId.forEach(sMailId => {
-                const oToken = this._formatter.validateEmail({ text: sMailId });
-                if (oToken) this._toMultiInput.addToken(oToken);
+        bindMailSuggestions: function (sModelName = '', sEntityName, sPropertyName) {
+            if (!(sEntityName && sPropertyName)) return MessageToast.show('To bind suggestions Entity and Property names are required!');
+
+            const sModel = (sModelName) ? sModelName + '>' : '';
+            const sPath = sModel + '/' + sEntityName;
+            const sProperty = sModel + sPropertyName;
+
+            [this._toMultiInput, this._ccMultiInput].forEach(oMultiInput => {
+                oMultiInput.bindAggregation("suggestionItems", {
+                    path: sPath,
+                    template: new Item({
+                        text: `{${sProperty}}`
+                    })
+                });
+                oMultiInput.setModel(this.getModel(sModelName), sModelName);
+                oMultiInput.attachSuggest(this._multiInputOnSuggest.bind(this,sPropertyName));
             });
+
         },
-        addCc: function (aMailId) {
+        _addMailId: function (oMultiInput, aMailId = []) {
             aMailId.forEach(sMailId => {
                 const oToken = this._formatter.validateEmail({ text: sMailId });
-                if (oToken) this._ccMultiInput.addToken(oToken);
+                if (oToken) oMultiInput.addToken(oToken);
             });
         },
         _onBeginBtnPress: function () {
-            const aTo = this._getToken(this._toMultiInput);
-            const aCc = this._getToken(this._ccMultiInput);
-            const sMsg = this._msgInput.getValue();
+            const aTo = this._getTokens(this._toMultiInput);
+            const aCc = this._getTokens(this._ccMultiInput);
+            const sMsg = this._msgTextArea.getValue();
 
             if (!aTo.length) return MessageToast.show('Please enter atleast one recipient mail address');
             if (!sMsg) return MessageToast.show('Please enter the message');
@@ -121,7 +141,21 @@ sap.ui.define([
             this.close();
         },
         _getTokens: function (oMultiInput) {
-            return oMultiInput.getTokens().map(oToken => oToken.getkey());
+            return oMultiInput.getTokens().map(oToken => oToken.getKey());
+        },
+        _multiInputOnSuggest: function (sPropertyName, oEvent) {
+            const sTerm = oEvent.getParameter("suggestValue");
+            const aFilters = [];
+            if (sTerm) {
+                // Create a filter to search for the typed value in the "Name" property
+                aFilters.push(new Filter(sPropertyName, FilterOperator.Contains, sTerm));
+            }
+
+            // Get the binding for the suggestionItems aggregation
+            const oBinding = oEvent.getSource().getBinding("suggestionItems");
+
+            // Apply the filter to the binding
+            oBinding.filter(aFilters);
         },
         _getFormatter: function () {
             return {
